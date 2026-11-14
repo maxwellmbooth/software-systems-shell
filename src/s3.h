@@ -67,4 +67,9 @@ void child_redir_input(char *args[], int argsc, struct Redirection redir);
 //Program launching functions (with redirection)
 void launch_program_with_redirection(char *args[], int argsc);
 
+void init_lwd(char lwd[]);
+
+int is_cd(const char *line);
+
+void run_cd(char *args[], int argsc, char lwd[]);
 #endif
