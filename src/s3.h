@@ -25,6 +25,18 @@ enum ArgIndex
     ARG_3,
 };
 
+enum RedirectionType {
+    REDIR_NONE,
+    REDIR_INPUT,
+    REDIR_OUTPUT,
+    REDIR_APPEND
+};
+
+struct Redirection {
+    enum RedirectionType type;
+    int index;
+};
+
 ///With inline functions, the compiler replaces the function call 
 ///with the actual function code;
 ///inline improves speed and readability; meant for short functions (a few lines).
@@ -44,4 +56,15 @@ void child(char *args[], int argsc);
 
 ///Program launching functions (add more as appropriate)
 void launch_program(char *args[], int argsc);
+
+//checks if the line includes any redirection inputs '<', '>', '>>'
+int command_with_redirection(char line[]);
+
+//child functions (including redirection)
+void child_redir_output(char *args[], int argsc, struct Redirection redir);
+void child_redir_input(char *args[], int argsc, struct Redirection redir);
+
+//Program launching functions (with redirection)
+void launch_program_with_redirection(char *args[], int argsc);
+
 #endif

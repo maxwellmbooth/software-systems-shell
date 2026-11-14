@@ -89,3 +89,111 @@ void launch_program(char *args[], int argsc)
     ///so that the shell, not the child process,
     ///exits.
 }
+
+int command_with_redirection(char line[]){
+    return strchr(line, '<') != NULL || strchr(line, '>') != NULL;
+}
+
+
+struct Redirection find_redirection(char *args[], int argsc){
+    for (int i = 0; i < argsc; i++) {
+        if (strcmp(args[i], "<") == 0)
+            return (struct Redirection){ .type = REDIR_INPUT, .index = i };
+        else if (strcmp(args[i], ">") == 0)
+            return (struct Redirection){ .type = REDIR_OUTPUT, .index = i };
+        else if (strcmp(args[i], ">>") == 0)
+            return (struct Redirection){ .type = REDIR_APPEND, .index = i };
+        
+}
+    return (struct Redirection){ .type = REDIR_NONE, .index = -1 };
+}
+
+void child_redir_output(char *args[], int argsc, struct Redirection redir){
+    
+    if (redir.index <= 0 || redir.index + 1 >= argsc) {
+        fprintf(stderr, "Expected a command and an output filename\n");
+        _exit(1);
+    }
+
+    int flags = O_WRONLY | O_CREAT; // 0001 O_WRONGLY 0010 O_CREAT
+    flags = flags | ((redir.type == REDIR_APPEND) ? O_APPEND : O_TRUNC);
+
+    int fd = open(args[redir.index + 1], flags, 0666);
+    if (fd == -1) {
+        perror("open");
+        _exit(1);
+    }
+
+    if (dup2(fd, STDOUT_FILENO) == -1) {
+        perror("dup2");
+        _exit(1);
+    }
+
+    if (fd != STDOUT_FILENO) {
+        close(fd);
+    }
+
+    for (int i = redir.index; i + 2 < argsc; i++) {
+        args[i] = args[i + 2];
+    }
+
+    argsc -= 2;
+    args[argsc] = NULL;
+    child(args, argsc); // Your existing helper calls execvp()
+    }
+
+void child_redir_input(char *args[], int argsc, struct Redirection redir){
+    if (redir.index <= 0 || redir.index + 1 >= argsc) {
+        fprintf(stderr, "Expected a command and an input filename\n");
+        _exit(1);
+    }
+    
+    int fd = open(args[redir.index + 1], O_RDONLY);
+    if(fd == -1){
+        perror("open");
+        _exit(1);
+    }
+
+    if(dup2(fd, STDIN_FILENO) == -1){
+        perror("dup2");
+        _exit(1);
+    }
+
+    if(fd != STDIN_FILENO){
+        close(fd);
+    }
+
+    for (int i = redir.index; i + 2 < argsc; i++) {
+        args[i] = args[i + 2];
+    }
+
+    argsc -= 2;
+    args[argsc] = NULL;
+    child(args, argsc);
+}
+
+void launch_program_with_redirection(char *args[], int argsc){
+    if(strcmp(args[ARG_PROGNAME], "exit") == 0 ){
+        exit(0);
+    }
+
+    pid_t pid = fork();
+    if(pid<0){
+        perror("fork failed");
+        exit(EXIT_FAILURE);
+    }
+    else if(pid == 0){
+        //child
+        struct Redirection redir = find_redirection(args, argsc);
+        if(redir.type == REDIR_OUTPUT || redir.type == REDIR_APPEND){
+            child_redir_output(args, argsc, redir);
+        }
+        else if(redir.type == REDIR_INPUT){
+            child_redir_input(args, argsc, redir);
+        }
+        else{
+            perror("REDIR_NONE");
+            exit(EXIT_FAILURE);
+        }
+    }
+}
