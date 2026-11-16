@@ -12,7 +12,7 @@
 #include <sys/wait.h>
 #include <string.h>
 
-void reap() {
+void reap(void) {
     wait(NULL);
 }
 
@@ -21,9 +21,6 @@ void launch_program(char *args[], int argsc) {
 
     if(argsc == 0){
         return;
-    }
-    if(strcmp(args[ARG_PROGNAME], "exit") == 0 ){
-        exit(0);
     }
 
     pid_t pid = fork();
@@ -62,7 +59,6 @@ void child(char *args[], int argsc) {
 }
 
 void child_redir_output(char *args[], int argsc, struct Redirection redir) {
-    
     if (redir.index <= 0 || redir.index + 1 >= argsc) {
         fprintf(stderr, "Expected a command and an output filename\n");
         _exit(1);
@@ -126,16 +122,13 @@ void child_redir_input(char *args[], int argsc, struct Redirection redir) {
 }
 
 void launch_program_with_redirection(char *args[], int argsc) {
-    if(strcmp(args[ARG_PROGNAME], "exit") == 0 ){
-        exit(0);
-    }
-
+    fflush(NULL); // flush output buffers before forking
     pid_t pid = fork();
-    if(pid<0){
-        perror("fork failed");
-        exit(EXIT_FAILURE);
-    }
-    else if(pid == 0){
+
+    if (pid < 0) {
+        perror("fork");
+        return;
+    } else if (pid == 0) {
         //child
         struct Redirection redir = find_redirection(args, argsc);
         if(redir.type == REDIR_OUTPUT || redir.type == REDIR_APPEND){
@@ -144,8 +137,8 @@ void launch_program_with_redirection(char *args[], int argsc) {
         else if(redir.type == REDIR_INPUT){
             child_redir_input(args, argsc, redir);
         }
-        else{
-            perror("REDIR_NONE");
+        else {
+            fprintf(stderr, "s3: no redirection operator found\n");
             exit(EXIT_FAILURE);
         }
     }

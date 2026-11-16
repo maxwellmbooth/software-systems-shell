@@ -1,5 +1,6 @@
 // Internal headers
 #include "builtins.h"
+#include "utils.h"
 
 // Standard libraries
 #include <stdio.h>
@@ -7,39 +8,55 @@
 #include <unistd.h>
 #include <string.h>
 
-void init_lwd(char lwd[]) {
-    
-    if(getcwd(lwd, MAX_PROMPT_LEN-6) == NULL){
+// Global variables
+static char lwd[MAX_PATH_LEN]; // The last working directory
+
+// Forward declarations
+static void builtin_cd(char *args[], int argsc);
+static void builtin_exit(char *args[], int argsc);
+
+// Function definitions
+void builtins_init(void) {
+    if(getcwd(lwd, MAX_PATH_LEN) == NULL){
         perror("getcwd");
         exit(EXIT_FAILURE);
     }
 }
 
-int is_cd(const char *line) {
-    while (*line == ' ') {
-        line++;
+builtin_fn builtin_find(char *name) {
+    if (strcmp(name, "cd") == 0) {
+        return builtin_cd;
+    } else if (strcmp(name, "exit") == 0) {
+        return builtin_exit;
+    } else {
+        return NULL;
     }
-
-    return strncmp(line, "cd", 2) == 0 && (line[2] == '\0' || line[2] == ' ');
 }
 
-void run_cd(char *args[], int argsc, char lwd[]) {
+// maybe separate destination assigning and actual command?
+static void builtin_cd(char *args[], int argsc) {
     const char *destination;
+    char exp_path[MAX_PATH_LEN];
 
     if (argsc == 1) {
-        destination = getenv("HOME");
-        if (destination == NULL || destination[0] == '\0') {
+        destination = get_home_dir();
+        if (destination == NULL) {
             fprintf(stderr, "cd: HOME is unset or empty\n");
             return;
         }
     } else if (argsc == 2) {
-        destination = strcmp(args[1], "-") == 0 ? lwd : args[1];
+        if (strcmp(args[1], "-") == 0) {
+            destination = lwd;
+        } else {
+            int expn = expand_tilde(args[1], exp_path, sizeof(exp_path));
+            destination = (expn > 0) ? exp_path : args[1];
+        }
     } else {
         fprintf(stderr, "Usage: cd [directory]\n");
         return;
     }
 
-    char saved_wd[MAX_PROMPT_LEN - 6];
+    char saved_wd[MAX_PATH_LEN];
     if (getcwd(saved_wd, sizeof saved_wd) == NULL) {
         perror("getcwd");
         return;
@@ -51,4 +68,12 @@ void run_cd(char *args[], int argsc, char lwd[]) {
     }
 
     strcpy(lwd, saved_wd);
+}
+
+static void builtin_exit(char *args[], int argsc) {
+    if (argsc > 1) {
+        exit(atoi(args[1]));
+    } else {
+        exit(0);
+    }
 }

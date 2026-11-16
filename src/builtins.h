@@ -4,10 +4,11 @@
 // Internal headers
 #include "common.h"
 
+// Builtin function type
+typedef void (*builtin_fn)(char *args[], int argsc);
 
 // Function declarations
-void init_lwd(char lwd[]);
-int is_cd(const char *line);
-void run_cd(char *args[], int argsc, char lwd[]);
+void builtins_init(void);
+builtin_fn builtin_find(char *name);
 
 #endif

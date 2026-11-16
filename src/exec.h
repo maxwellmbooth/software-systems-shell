@@ -5,7 +5,7 @@
 #include "common.h"
 
 // Function declarations
-void reap();
+void reap(void);
 void child(char *args[], int argsc);
 void launch_program(char *args[], int argsc);
 void child_redir_output(char *args[], int argsc, struct Redirection redir);
