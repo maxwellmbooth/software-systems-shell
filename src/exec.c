@@ -12,23 +12,17 @@
 #include <sys/wait.h>
 #include <string.h>
 
-void reap(void) {
-    wait(NULL);
-}
-
 void launch_program(char *args[], int argsc) {
-    ///Implement this function:
+    if (argsc == 0) return;
 
-    if(argsc == 0){
+    fflush(NULL); // flush output buffers before forking
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        perror("fork");
         return;
     }
-
-    pid_t pid = fork();
-    if(pid<0){
-        perror("fork failed");
-        exit(EXIT_FAILURE);
-    }
-    else if(pid == 0){
+    else if (pid == 0) {
         //child
         child(args, argsc);
     }
@@ -133,11 +127,9 @@ void launch_program_with_redirection(char *args[], int argsc) {
         struct Redirection redir = find_redirection(args, argsc);
         if(redir.type == REDIR_OUTPUT || redir.type == REDIR_APPEND){
             child_redir_output(args, argsc, redir);
-        }
-        else if(redir.type == REDIR_INPUT){
+        } else if (redir.type == REDIR_INPUT) {
             child_redir_input(args, argsc, redir);
-        }
-        else {
+        } else {
             fprintf(stderr, "s3: no redirection operator found\n");
             exit(EXIT_FAILURE);
         }
