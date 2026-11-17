@@ -8,6 +8,10 @@
 struct Command {
     char *args[MAX_ARGS];
     int argsc;
+
+    char *infile;
+    char *outfile;
+    int is_append;
 };
 
 struct Pipeline {

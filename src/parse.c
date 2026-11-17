@@ -144,13 +144,41 @@ static int parse_pipeline(struct Parser *p, struct Pipeline *pl) {
 static int parse_command(struct Parser *p, struct Command *cmd) {
     *cmd = (struct Command){0};
 
-    while (p->tokens[p->pos].type == TOK_WORD) { // replace with switch for redirects
-        if (cmd->argsc >= MAX_ARGS - 1) {
-            fprintf(stderr, "s3: too many arguments\n");
-            return -1;
-        }
+    while (1) {
+        const struct Token *t = &p->tokens[p->pos];
 
-        cmd->args[cmd->argsc++] = p->tokens[p->pos++].word;
+        switch (t->type) {
+            case TOK_WORD: {
+                if (cmd->argsc >= MAX_ARGS - 1) {
+                    fprintf(stderr, "s3: too many arguments\n");
+                    return -1;
+                }
+            
+                cmd->args[cmd->argsc++] = t->word;
+                p->pos++;
+                continue;
+            }
+            case TOK_REDIR_IN:
+            case TOK_REDIR_OUT:
+            case TOK_REDIR_APPEND: {
+                const struct Token *file = &p->tokens[p->pos + 1];
+                if (file->type != TOK_WORD) {
+                    fprintf(stderr, "s3: syntax error: expected a filename\n");
+                    return -1;
+                }
+                if (t->type == TOK_REDIR_IN) {
+                    cmd->infile = file->word;
+                } else {
+                    cmd->outfile = file->word;
+                    cmd->is_append = (t->type == TOK_REDIR_APPEND);
+                }
+                p->pos += 2;
+                continue;
+            }
+            default:
+                break;
+        }
+        break;
     }
 
     if (cmd->argsc == 0) {
@@ -162,7 +190,7 @@ static int parse_command(struct Parser *p, struct Command *cmd) {
     return 0;
 }
 
-struct Redirection find_redirection(char *args[], int argsc){
+struct Redirection find_redirection (char *args[], int argsc) {
     for (int i = 0; i < argsc; i++) {
         if (strcmp(args[i], "<") == 0)
             return (struct Redirection) { .type = REDIR_INPUT, .index = i };
