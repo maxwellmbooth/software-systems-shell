@@ -5,6 +5,7 @@
 #include "common.h"
 
 // Function declarations
+int parse_line(char *line);
 int parse_command(char line[], char *args[]);
 struct Redirection find_redirection(char *args[], int argsc);
 
