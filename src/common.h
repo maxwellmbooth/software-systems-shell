@@ -3,9 +3,13 @@
 
 // Common constants
 #define MAX_LINE 1024
-#define MAX_ARGS 128
 #define MAX_PATH_LEN 256
 #define MAX_PROMPT_LEN (MAX_PATH_LEN + 64)
+
+#define MAX_TOKENS MAX_LINE
+#define MAX_PIPELINES 16
+#define MAX_COMMANDS 16
+#define MAX_ARGS 128
 
 // ANSI color codes
 #define COLOR_BOLD "\033[1m"

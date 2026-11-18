@@ -4,8 +4,27 @@
 // Internal headers
 #include "common.h"
 
+// Structs
+struct Command {
+    char *args[MAX_ARGS];
+    int argsc;
+
+    char *infile;
+    char *outfile;
+    int is_append;
+};
+
+struct Pipeline {
+    struct Command commands[MAX_COMMANDS];
+    int commandsc;
+};
+
+struct Batch {
+    struct Pipeline pipelines[MAX_PIPELINES];
+    int pipelinesc;
+};
+
 // Function declarations
-int parse_command(char line[], char *args[]);
-struct Redirection find_redirection(char *args[], int argsc);
+int parse_line(char *line, struct Batch *batch);
 
 #endif

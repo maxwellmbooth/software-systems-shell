@@ -3,6 +3,7 @@
 
 // Internal headers
 #include "common.h"
+#include "parse.h"
 
 // Function declarations
 void reap(void);
