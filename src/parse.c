@@ -44,11 +44,6 @@ static int parse_batch(struct Parser *parser, struct Batch *batch);
 static int parse_pipeline(struct Parser *p, struct Pipeline *pipe);
 static int parse_command(struct Parser *p, struct Command *cmd);
 
-// Functions
-void reap(void) {
-    wait(NULL);
-}
-
 // Parse a line of shell input
 int parse_line(char *line, struct Batch *batch) {
     batch->pipelinesc = 0;
@@ -188,19 +183,6 @@ static int parse_command(struct Parser *p, struct Command *cmd) {
 
     cmd->args[cmd->argsc] = NULL;
     return 0;
-}
-
-struct Redirection find_redirection (char *args[], int argsc) {
-    for (int i = 0; i < argsc; i++) {
-        if (strcmp(args[i], "<") == 0)
-            return (struct Redirection) { .type = REDIR_INPUT, .index = i };
-        else if (strcmp(args[i], ">") == 0)
-            return (struct Redirection) { .type = REDIR_OUTPUT, .index = i };
-        else if (strcmp(args[i], ">>") == 0)
-            return (struct Redirection) { .type = REDIR_APPEND, .index = i };
-        
-    }
-    return (struct Redirection) { .type = REDIR_NONE, .index = -1 };
 }
 
 // Creates a list of tokens from the input to allow for multiple operators

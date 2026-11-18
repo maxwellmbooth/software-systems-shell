@@ -26,6 +26,5 @@ struct Batch {
 
 // Function declarations
 int parse_line(char *line, struct Batch *batch);
-struct Redirection find_redirection(char *args[], int argsc);
 
 #endif
