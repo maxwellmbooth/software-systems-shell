@@ -158,7 +158,7 @@ static int parse_command(struct Parser *p, struct Command *cmd) {
             case TOK_REDIR_APPEND: {
                 const struct Token *file = &p->tokens[p->pos + 1];
                 if (file->type != TOK_WORD) {
-                    fprintf(stderr, "s3: syntax error: expected a filename\n");
+                    fprintf(stderr, "s3: expected a filename\n");
                     return -1;
                 }
                 if (t->type == TOK_REDIR_IN) {

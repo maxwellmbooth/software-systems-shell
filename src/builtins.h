@@ -5,7 +5,7 @@
 #include "common.h"
 
 // Builtin function type
-typedef void (*builtin_fn)(char *args[], int argsc);
+typedef int (*builtin_fn)(char *const args[], int argsc);
 
 // Function declarations
 void builtins_init(void);
