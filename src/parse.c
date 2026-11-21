@@ -7,15 +7,19 @@
 #include <string.h>
 
 // Defines
-#define SPECIAL_CHARS " \t|;()<>"
+#define SPECIAL_CHARS " \t&|;()<>"
+#define NUM_OPERATORS (sizeof(operators) / sizeof(operators[0]))
 
 // Enums
 enum TokenType {
     TOK_WORD,
-    TOK_REDIR_IN,
-    TOK_REDIR_OUT,
     TOK_REDIR_APPEND,
+    TOK_AND,
+    TOK_OR,
+    TOK_REDIR_OUT,
+    TOK_REDIR_IN,
     TOK_PIPE,
+    TOK_BG,
     TOK_SEMI,
     TOK_LPAREN,
     TOK_RPAREN,
@@ -38,11 +42,30 @@ struct Parser {
     int pos;
 };
 
+// Variables and Tables
+static const struct {
+    const char *text;
+    enum TokenType type;
+} operators[] = {
+    {">>",TOK_REDIR_APPEND},
+    {"&&", TOK_AND},
+    {"||", TOK_OR},
+    {">", TOK_REDIR_OUT},
+    {"<", TOK_REDIR_IN},
+    {"|", TOK_PIPE},
+    {"&", TOK_BG},
+    {";", TOK_SEMI},
+    {"(", TOK_LPAREN},
+    {")", TOK_RPAREN},
+};
+
 // Forward declarations
-static int tokenise(char *line, struct TokenList *toks);
 static int parse_batch(struct Parser *parser, struct Batch *batch);
 static int parse_pipeline(struct Parser *p, struct Pipeline *pipe);
 static int parse_command(struct Parser *p, struct Command *cmd);
+static int tokenise(char *line, struct TokenList *toks);
+static char *read_word(char *p);
+static size_t operator_at(const char *p, enum TokenType *type);
 
 // Parse a line of shell input
 int parse_line(char *line, struct Batch *batch) {
@@ -186,7 +209,6 @@ static int parse_command(struct Parser *p, struct Command *cmd) {
 }
 
 // Creates a list of tokens from the input to allow for multiple operators
-// Replace with an operator lookup table when expanding to cover more ops
 static int tokenise(char *line, struct TokenList *toks) {
     toks->toksc = 0;
     char *p = line;
@@ -197,50 +219,82 @@ static int tokenise(char *line, struct TokenList *toks) {
             return -1;
         }
 
-        switch (*p) {
-            case '<':
-                toks->tokens[toks->toksc].type = TOK_REDIR_IN;
-                *p++ = '\0';
-                break;
-            case '>':
-                if (*(p + 1) == '>') {
-                    toks->tokens[toks->toksc].type = TOK_REDIR_APPEND;
-                    *p++ = '\0';
-                    *p++ = '\0';
-                    break;
-                } else {
-                    toks->tokens[toks->toksc].type = TOK_REDIR_OUT;
-                    *p++ = '\0';
-                    break;
-                }
-            case '|':
-                toks->tokens[toks->toksc].type = TOK_PIPE;
-                *p++ = '\0';
-                break;
-            case ';':
-                toks->tokens[toks->toksc].type = TOK_SEMI;
-                *p++ = '\0';
-                break;
-            case '(':
-                toks->tokens[toks->toksc].type = TOK_LPAREN;
-                *p++ = '\0';
-                break;
-            case ')':
-                toks->tokens[toks->toksc].type = TOK_RPAREN;
-                *p++ = '\0';
-                break;
-            case ' ': case '\t':
-                *p++ = '\0';
-                continue;
-            default:
-                toks->tokens[toks->toksc].type = TOK_WORD;
-                toks->tokens[toks->toksc].word = p;
-                p += strcspn(p, SPECIAL_CHARS);
-                break;
+        // null terminate words
+        if (*p == ' ' || *p == '\t') {
+            *p++ = '\0';
+            continue;
         }
+
+        struct Token *t = &toks->tokens[toks->toksc];
+        *t = (struct Token){0};
+
+        enum TokenType type;
+        size_t tlen = operator_at(p, &type);
+
+        // set operators to null after read for word termination and add token type/word
+        if (tlen > 0) {
+            t->type = type;
+            memset(p, '\0', tlen);
+            p += tlen;
+        } else {
+            t->type = TOK_WORD;
+            t->word = p;
+            p = read_word(p);
+            if (p == NULL) {
+                return -1;
+            }
+        }
+        
         toks->toksc++;
     }
 
     toks->tokens[toks->toksc].type = TOK_END;
+    return 0;
+}
+
+// Read a word starting from p, removing quotes and keeping symbols inside quotes
+static char *read_word(char *p) {
+    char *next = p; // pointer to next character to write to (as letters must be shifted when quotes take up space)
+    char qchar = '\0';
+
+    while (*p != '\0') {
+        if (qchar != '\0') {
+            if (*p == qchar) {
+                qchar = '\0';
+                p++;
+                continue;
+            }
+        } else if (*p == '\'' || *p == '"') {
+            qchar = *p++;
+            continue;
+        } else if (strchr(SPECIAL_CHARS, *p) != NULL) {
+            break;
+        }
+
+        *next++ = *p++; // write the next character
+    }
+
+    if (qchar != '\0') {
+        fprintf(stderr, "s3: mismatched quote\n");
+        return NULL;
+    }
+
+    // null terminate string earlier if quotes removed
+    if (next != p) {
+        *next = '\0';
+    }
+
+    return p;
+}
+
+// Get the operator at the current position, return its length and set the type
+static size_t operator_at(const char *p, enum TokenType *type) {
+    for (size_t i = 0; i < NUM_OPERATORS; i++) {
+        size_t n = strlen(operators[i].text);
+        if (strncmp(p, operators[i].text, n) == 0) {
+            *type = operators[i].type;
+            return n;
+        }
+    }
     return 0;
 }

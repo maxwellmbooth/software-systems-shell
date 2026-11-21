@@ -18,7 +18,7 @@ static int builtin_exit(char *const args[], int argsc);
 
 // Function definitions
 void builtins_init(void) {
-    if(getcwd(lwd, MAX_PATH_LEN) == NULL){
+    if (getcwd(lwd, MAX_PATH_LEN) == NULL) {
         perror("getcwd");
         exit(EXIT_FAILURE);
     }
