@@ -16,6 +16,7 @@
 static void exec_pipeline(const struct Pipeline *pl);
 static void exec_command(const struct Command *cmd);
 static void exec_builtin(const struct Command *cmd, builtin_fn builtin);
+static int redirect_pipes(const int pipe_fds[2], int last_read_fd);
 static int redirect_io(const struct Command *cmd);
 
 // Run through a batch to run every pipeline
@@ -41,18 +42,41 @@ static void exec_pipeline(const struct Pipeline *pl) {
     // otherwise execute a command in child process
     pid_t pids[MAX_COMMANDS];
     int pran = 0;
+
+    int pipe_fds[2] = {-1, -1};
+    int last_read_fd = -1;
+
     fflush(NULL);
 
     for (int i = 0; i < pl->commandsc; i++) {
+        pipe_fds[0] = pipe_fds[1] = -1;
+
+        // create pipe if not last command
+        if (i != pl->commandsc - 1) {
+            pipe(pipe_fds);
+        }
+
         pid_t pid = fork();
         if (pid < 0) {
             perror("fork");
             break;
         } else if (pid == 0) {
+            redirect_pipes(pipe_fds, last_read_fd);
             exec_command(&pl->commands[i]);
         }
 
         pids[pran++] = pid;
+
+        // if last output existed, close it
+        if (last_read_fd != -1) {
+            close(last_read_fd);
+        }
+
+        // if a next pipe was made close write side and set last to current read side
+        if (pipe_fds[1] != -1) {
+            close(pipe_fds[1]);
+        }
+        last_read_fd = pipe_fds[0];
     }
 
     // reap all child processes
@@ -110,6 +134,23 @@ static void exec_builtin(const struct Command *cmd, builtin_fn builtin) {
     close(out_fd);
 
     return;
+}
+
+static int redirect_pipes(const int pipe_fds[2], int last_read_fd) {
+    // if last pipe existed copy last read side to input
+    if (last_read_fd != -1) {
+        dup2(last_read_fd, STDIN_FILENO);
+        close(last_read_fd);
+    }
+
+    // if next pipe is needed copy output to write side
+    if (pipe_fds[1] != -1) {
+        dup2(pipe_fds[1], STDOUT_FILENO);
+        close(pipe_fds[1]);
+    }
+
+    close(pipe_fds[0]);
+    return 0;
 }
 
 static int redirect_io(const struct Command *cmd) {
