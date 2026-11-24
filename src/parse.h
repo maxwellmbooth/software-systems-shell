@@ -22,6 +22,8 @@ struct Pipeline {
 
 struct Batch {
     char line[MAX_LINE];
+    char word_pool[WORD_POOL_SIZE];
+
     struct Pipeline pipelines[MAX_PIPELINES];
     int pipelinesc;
 };

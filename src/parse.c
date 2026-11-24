@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <glob.h>
 
 // Defines
 #define SPECIAL_CHARS " \t&|;()<>"
@@ -30,6 +31,7 @@ enum TokenType {
 struct Token {
     enum TokenType type;
     char *word;
+    int quoted;
     int offset;
 };
 
@@ -42,6 +44,9 @@ struct Parser {
     struct Token *tokens;
     int tpos;
     char* line;
+
+    char* wp;
+    char* wp_end;
 };
 
 // Variables and Tables
@@ -66,7 +71,7 @@ static int parse_batch(struct Parser *parser, struct Batch *batch);
 static int parse_pipeline(struct Parser *p, struct Pipeline *pl);
 static int parse_command(struct Parser *p, struct Command *cmd);
 static int tokenise(char *line, struct TokenList *toks);
-static char *read_word(char *p);
+static char *read_word(char *p, int *quoted);
 static size_t operator_at(const char *p, enum TokenType *type);
 
 // Parse a line of shell input
@@ -96,7 +101,9 @@ int parse_line(char *line, struct Batch *batch) {
     struct Parser parser = {
         .tokens = token_list.tokens,
         .tpos = 0,
-        .line = batch->line
+        .line = batch->line,
+        .wp = batch->word_pool,
+        .wp_end = batch->word_pool + WORD_POOL_SIZE
     };
 
     if (parse_batch(&parser, batch) == -1) {
@@ -187,8 +194,43 @@ static int parse_command(struct Parser *p, struct Command *cmd) {
                     fprintf(stderr, "s3: syntax error near ')'\n");
                     return -1;
                 }
-            
-                cmd->args[cmd->argsc++] = t->word;
+
+                if (!t->quoted && strpbrk(t->word, "*?[{") != NULL) {
+                    glob_t g;
+                    if (glob(t->word, GLOB_NOCHECK | GLOB_BRACE, NULL, &g) != 0) {
+                        fprintf(stderr, "s3: globbing failed\n");
+                        globfree(&g);
+                        return -1; 
+                    }
+
+                    for (size_t i = 0; i < g.gl_pathc; i++) {
+                        if (cmd->argsc >= MAX_ARGS - 1) {
+                            fprintf(stderr, "s3: too many arguments\n");
+                            globfree(&g);
+                            return -1;
+                        }
+
+                        const char *s = g.gl_pathv[i];
+                        size_t len = strlen(s);
+
+                        if (p->wp + len > p->wp_end - 1) {
+                            fprintf(stderr, "s3: word pool size exceeded\n");
+                            globfree(&g);
+                            return -1;
+                        }
+
+                        strcpy(p->wp, s);
+                        cmd->args[cmd->argsc++] = p->wp;
+
+                        p->wp += (len + 1);
+                    }
+
+                    globfree(&g);
+
+                } else {
+                    cmd->args[cmd->argsc++] = t->word;
+                }
+        
                 p->tpos++;
                 continue;
             }
@@ -293,7 +335,7 @@ static int tokenise(char *line, struct TokenList *toks) {
         } else {
             t->type = TOK_WORD;
             t->word = p;
-            p = read_word(p);
+            p = read_word(p, &t->quoted);
             if (p == NULL) {
                 return -1;
             }
@@ -307,7 +349,8 @@ static int tokenise(char *line, struct TokenList *toks) {
 }
 
 // Read a word starting from p, removing quotes and keeping symbols inside quotes
-static char *read_word(char *p) {
+static char *read_word(char *p, int *quoted) {
+    *quoted = 0;
     char *next = p; // pointer to next character to write to (as letters must be shifted when quotes take up space)
     char qchar = '\0';
 
@@ -336,6 +379,7 @@ static char *read_word(char *p) {
     // null terminate string earlier if quotes removed
     if (next != p) {
         *next = '\0';
+        *quoted = 1;
     }
 
     return p;
