@@ -9,48 +9,52 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <errno.h>
 #include <string.h>
 
-void construct_shell_prompt(char shell_prompt[]);
-void read_command_line(char line[]);
+static void construct_shell_prompt(char shell_prompt[]);
+static void read_command_line(char line[]);
 
-int main(int argc, char *argv[]){
+// Main entry point
+int main(int argc, char *argv[]) {
+    // initialize builtin cwd
+    builtins_init();
 
-    ///Stores the command line input
-    char line[MAX_LINE];
+    static struct Batch batch;
 
-    builtins_init();///Implement this function: initializes lwd with the cwd (using getcwd)
+    if (argc > 1) {
+        if (parse_line(argv[1], &batch) == -1) {
+            return 2;
+        }
 
-    //Stores pointers to command arguments.
-    ///The first element of the array is the command name.
-    char *args[MAX_ARGS];
+        // empty line
+        if (batch.pipelinesc == 0) {
+            return 0;
+        }
 
-    ///Stores the number of arguments
-    int argsc;
-
-    while (1) {
-
-        read_command_line(line); ///Notice the additional parameter (required for prompt construction)
-        argsc = parse_command(line, args);
-        if (argsc <= 0) continue;
-
-        builtin_fn builtin = builtin_find(args[0]);
-        if (builtin) {
-            builtin(args, argsc);
-        } else if (find_redirection(args, argsc).type != REDIR_NONE) {
-            ///Command with redirection
-           launch_program_with_redirection(args, argsc);
-           reap();
-       } else {
-           launch_program(args, argsc);
-           reap();
-       }
+        exec_batch(&batch);
+        return 0;
     }
 
-    return 0;
+    char line[MAX_LINE];
+
+    while (1) {
+        read_command_line(line);
+
+        if (parse_line(line, &batch) == -1) {
+            continue;
+        }
+
+        // empty line
+        if (batch.pipelinesc == 0) {
+            continue;
+        }
+
+        exec_batch(&batch);
+    }
 }
 
-void construct_shell_prompt(char shell_prompt[]) {
+static void construct_shell_prompt(char shell_prompt[]) {
     char cwd[MAX_PATH_LEN];
     const char *prefix = "";
     const char *dir = "?";
@@ -66,11 +70,11 @@ void construct_shell_prompt(char shell_prompt[]) {
 }
 
 ///Prints a shell prompt and reads input from the user
-void read_command_line(char line[]) {
+static void read_command_line(char line[]) {
     char shell_prompt[MAX_PROMPT_LEN]; // creates/reserves space for the character array. It does not fill it yet.
     construct_shell_prompt(shell_prompt);
     printf("%s", shell_prompt); // %s - print a c string
-    fflush(stdout); // flush stdout buffer to prevent pipeline capturing prompt
+    fflush(stdout); // flush stdout buffer before fgets blocks
 
     ///See man page of fgets(...)
     if (fgets(line, MAX_LINE, stdin) == NULL) {
@@ -78,7 +82,8 @@ void read_command_line(char line[]) {
             putchar('\n');
             exit(0);
         }
-        perror("fgets failed");
+
+        fprintf(stderr, "s3: fgets: %s\n", strerror(errno));
         exit(1);
     }
     ///Remove newline (enter)

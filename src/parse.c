@@ -7,15 +7,19 @@
 #include <string.h>
 
 // Defines
-#define SPECIAL_CHARS " \t|;()<>"
+#define SPECIAL_CHARS " \t&|;()<>"
+#define NUM_OPERATORS (sizeof(operators) / sizeof(operators[0]))
 
 // Enums
 enum TokenType {
     TOK_WORD,
-    TOK_REDIR_IN,
-    TOK_REDIR_OUT,
     TOK_REDIR_APPEND,
+    TOK_AND,
+    TOK_OR,
+    TOK_REDIR_OUT,
+    TOK_REDIR_IN,
     TOK_PIPE,
+    TOK_BG,
     TOK_SEMI,
     TOK_LPAREN,
     TOK_RPAREN,
@@ -26,93 +30,325 @@ enum TokenType {
 struct Token {
     enum TokenType type;
     char *word;
+    int offset;
 };
 
-void reap(void) {
-    wait(NULL);
+struct TokenList {
+    struct Token tokens[MAX_TOKENS];
+    int toksc;
+};
+
+struct Parser {
+    struct Token *tokens;
+    int tpos;
+    char* line;
+};
+
+// Variables and Tables
+static const struct {
+    const char *text;
+    enum TokenType type;
+} operators[] = {
+    {">>",TOK_REDIR_APPEND},
+    {"&&", TOK_AND},
+    {"||", TOK_OR},
+    {">", TOK_REDIR_OUT},
+    {"<", TOK_REDIR_IN},
+    {"|", TOK_PIPE},
+    {"&", TOK_BG},
+    {";", TOK_SEMI},
+    {"(", TOK_LPAREN},
+    {")", TOK_RPAREN},
+};
+
+// Forward declarations
+static int parse_batch(struct Parser *parser, struct Batch *batch);
+static int parse_pipeline(struct Parser *p, struct Pipeline *pl);
+static int parse_command(struct Parser *p, struct Command *cmd);
+static int tokenise(char *line, struct TokenList *toks);
+static char *read_word(char *p);
+static size_t operator_at(const char *p, enum TokenType *type);
+
+// Parse a line of shell input
+int parse_line(char *line, struct Batch *batch) {
+
+    size_t llen = strlen(line);
+    if (llen > MAX_LINE - 1) {
+        fprintf(stderr, "s3: line too long\n");
+        return -1;
+    }
+
+    batch->pipelinesc = 0;
+    strcpy(batch->line, line);
+
+    // tokenise line
+    struct TokenList token_list;
+    if (tokenise(line, &token_list) == -1) {
+        return -1;
+    }
+
+    // check if empty line
+    if (token_list.toksc == 0) {
+        return 0;
+    }
+
+    // parse line
+    struct Parser parser = {
+        .tokens = token_list.tokens,
+        .tpos = 0,
+        .line = batch->line
+    };
+
+    if (parse_batch(&parser, batch) == -1) {
+        return -1;
+    }
+
+    // check for unparsed token
+    if (token_list.tokens[parser.tpos].type != TOK_END) {
+        fprintf(stderr, "s3: unexpected token\n");
+        return -1;
+    }
+
+    return 0;
 }
 
-int parse_command(char line[], char *args[]) {
-    char *token = strtok(line, " \t"); // finds text up to the first space and also the space is replaced with '\0', ending the first string.
-    int argsc = 0;
-    while (token != NULL && argsc < MAX_ARGS - 1)
-    {
-        args[(argsc)++] = token;
-        token = strtok(NULL, " \t"); // continues searching through the same input string.
-    }
+// Produce a batch of pipelines from the tokens
+static int parse_batch(struct Parser *p, struct Batch *bat) {
+    bat->pipelinesc = 0;
     
-    args[argsc] = NULL; ///args must be null terminated
-    return argsc;
-}
+    while (1) {
+        if (bat->pipelinesc >= MAX_PIPELINES) {
+            fprintf(stderr, "s3: too many pipelines\n");
+            return -1;
+        }
 
-struct Redirection find_redirection(char *args[], int argsc){
-    for (int i = 0; i < argsc; i++) {
-        if (strcmp(args[i], "<") == 0)
-            return (struct Redirection){ .type = REDIR_INPUT, .index = i };
-        else if (strcmp(args[i], ">") == 0)
-            return (struct Redirection){ .type = REDIR_OUTPUT, .index = i };
-        else if (strcmp(args[i], ">>") == 0)
-            return (struct Redirection){ .type = REDIR_APPEND, .index = i };
-        
+        // add pipeline to batch
+        if (parse_pipeline(p, &bat->pipelines[bat->pipelinesc]) == -1) {
+            return -1;
+        }
+        bat->pipelinesc++;
+
+        // keep going until no more pipeline separators are present
+        if (p->tokens[p->tpos].type != TOK_SEMI) {
+            break;
+        }
+        p->tpos++;
+
+        // check if next token is end as trailing ; is permitted
+        if (p->tokens[p->tpos].type == TOK_END) {
+            break;
+        }
     }
-    return (struct Redirection){ .type = REDIR_NONE, .index = -1 };
+
+    return 0;
 }
 
-// Replace with an operator lookup table when expanding
-static int tokenise(char *line, struct Token tokens[], int tlen) {
+// Produce pipeline containing commands
+static int parse_pipeline(struct Parser *p, struct Pipeline *pl) {
+    pl->commandsc = 0;
+
+    while (1) {
+        if (pl->commandsc >= MAX_COMMANDS) {
+            fprintf(stderr, "s3: too many commands\n");
+            return -1;
+        }
+
+        // add command to pipeline
+        if (parse_command(p, &pl->commands[pl->commandsc]) == -1) {
+            return -1;
+        }
+        pl->commandsc++;
+
+        // keep going until no more command separators are present
+        if (p->tokens[p->tpos].type != TOK_PIPE) {
+            break;
+        }
+        p->tpos++;
+    }
+
+    return 0;
+}
+
+// Produce command containing argument info
+static int parse_command(struct Parser *p, struct Command *cmd) {
+    *cmd = (struct Command){0};
+
+    while (1) {
+        const struct Token *t = &p->tokens[p->tpos];
+
+        switch (t->type) {
+            case TOK_WORD: {
+                if (cmd->argsc >= MAX_ARGS - 1) {
+                    fprintf(stderr, "s3: too many arguments\n");
+                    return -1;
+                }
+
+                if (cmd->subshell != NULL) {
+                    fprintf(stderr, "s3: syntax error near ')'\n");
+                    return -1;
+                }
+            
+                cmd->args[cmd->argsc++] = t->word;
+                p->tpos++;
+                continue;
+            }
+
+            case TOK_REDIR_IN:
+            case TOK_REDIR_OUT:
+            case TOK_REDIR_APPEND: {
+                const struct Token *file = &p->tokens[p->tpos + 1];
+                if (file->type != TOK_WORD) {
+                    fprintf(stderr, "s3: expected a filename\n");
+                    return -1;
+                }
+                if (t->type == TOK_REDIR_IN) {
+                    cmd->infile = file->word;
+                } else {
+                    cmd->outfile = file->word;
+                    cmd->is_append = (t->type == TOK_REDIR_APPEND);
+                }
+                p->tpos += 2;
+                continue;
+            }
+
+            case TOK_LPAREN: {
+                if (cmd->argsc != 0 || cmd->subshell != NULL) {
+                    fprintf(stderr, "s3: syntax error near '('\n");
+                    return -1;
+                }
+                p->tpos++;
+                t = &p->tokens[p->tpos];
+
+                if (t->type == TOK_RPAREN) {
+                    fprintf(stderr, "s3: empty subshell\n");
+                    return -1;
+                }
+
+                cmd->subshell = p->line + t->offset;
+                int depth = 1;
+
+                while (depth != 0) {
+                    if (t->type == TOK_LPAREN) {
+                        depth++;
+                    } else if (t->type == TOK_RPAREN) {
+                        depth--;
+                        if (depth == 0) {
+                            p->line[t->offset] = '\0';
+                        }
+                    } else if (t->type == TOK_END) {
+                        fprintf(stderr, "s3: expected a )\n");
+                        return -1;
+                    }
+
+                    p->tpos++;
+                    t = &p->tokens[p->tpos];
+                }
+                continue;
+            }
+
+            default:
+                break;
+        }
+        break;
+    }
+
+    if (cmd->argsc == 0 && cmd->subshell == NULL) {
+        fprintf(stderr, "s3: expected a command\n");
+        return -1;
+    }
+
+    cmd->args[cmd->argsc] = NULL;
+    return 0;
+}
+
+// Creates a list of tokens from the input to allow for multiple operators
+static int tokenise(char *line, struct TokenList *toks) {
+    toks->toksc = 0;
     char *p = line;
-    int n = 0;
 
     while (*p != '\0') {
-        if (n >= tlen - 1) {
+        if (toks->toksc >= MAX_TOKENS - 1) {
             fprintf(stderr, "s3: too many tokens\n");
             return -1;
         }
 
-        switch (*p) {
-            case '<':
-                tokens[n].type = TOK_REDIR_IN;
-                *p++ = '\0';
-                break;
-            case '>':
-                if (*(p + 1) == '>') {
-                    tokens[n].type = TOK_REDIR_APPEND;
-                    *p++ = '\0';
-                    *p++ = '\0';
-                    break;
-                } else {
-                    tokens[n].type = TOK_REDIR_OUT;
-                    *p++ = '\0';
-                    break;
-                }
-            case '|':
-                tokens[n].type = TOK_PIPE;
-                *p++ = '\0';
-                break;
-            case ';':
-                tokens[n].type = TOK_SEMI;
-                *p++ = '\0';
-                break;
-            case '(':
-                tokens[n].type = TOK_LPAREN;
-                *p++ = '\0';
-                break;
-            case ')':
-                tokens[n].type = TOK_RPAREN;
-                *p++ = '\0';
-                break;
-            case ' ': case '\t':
-                *p++ = '\0';
-                continue;
-            default:
-                tokens[n].type = TOK_WORD;
-                tokens[n].word = p;
-                p += strcspn(p, SPECIAL_CHARS);
-                break;
+        // null terminate words
+        if (*p == ' ' || *p == '\t') {
+            *p++ = '\0';
+            continue;
         }
-        n++;
+
+        struct Token *t = &toks->tokens[toks->toksc];
+        *t = (struct Token){0};
+        t->offset = (int)(p - line);
+
+        enum TokenType type;
+        size_t tlen = operator_at(p, &type);
+
+        // set operators to null after read for word termination and add token type/word
+        if (tlen > 0) {
+            t->type = type;
+            memset(p, '\0', tlen);
+            p += tlen;
+        } else {
+            t->type = TOK_WORD;
+            t->word = p;
+            p = read_word(p);
+            if (p == NULL) {
+                return -1;
+            }
+        }
+        
+        toks->toksc++;
     }
 
-    tokens[n].type = TOK_END;
-    return n;
+    toks->tokens[toks->toksc].type = TOK_END;
+    return 0;
+}
+
+// Read a word starting from p, removing quotes and keeping symbols inside quotes
+static char *read_word(char *p) {
+    char *next = p; // pointer to next character to write to (as letters must be shifted when quotes take up space)
+    char qchar = '\0';
+
+    while (*p != '\0') {
+        if (qchar != '\0') {
+            if (*p == qchar) {
+                qchar = '\0';
+                p++;
+                continue;
+            }
+        } else if (*p == '\'' || *p == '"') {
+            qchar = *p++;
+            continue;
+        } else if (strchr(SPECIAL_CHARS, *p) != NULL) {
+            break;
+        }
+
+        *next++ = *p++; // write the next character
+    }
+
+    if (qchar != '\0') {
+        fprintf(stderr, "s3: mismatched quote\n");
+        return NULL;
+    }
+
+    // null terminate string earlier if quotes removed
+    if (next != p) {
+        *next = '\0';
+    }
+
+    return p;
+}
+
+// Get the operator at the current position, return its length and set the type
+static size_t operator_at(const char *p, enum TokenType *type) {
+    for (size_t i = 0; i < NUM_OPERATORS; i++) {
+        size_t n = strlen(operators[i].text);
+        if (strncmp(p, operators[i].text, n) == 0) {
+            *type = operators[i].type;
+            return n;
+        }
+    }
+    return 0;
 }

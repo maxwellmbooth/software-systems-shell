@@ -1,3 +1,8 @@
 # Binary files
 bin/
+
+# Build files
 build/
+
+# Text files
+/txt
