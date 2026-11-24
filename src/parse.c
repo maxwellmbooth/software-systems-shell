@@ -30,6 +30,7 @@ enum TokenType {
 struct Token {
     enum TokenType type;
     char *word;
+    int offset;
 };
 
 struct TokenList {
@@ -39,7 +40,8 @@ struct TokenList {
 
 struct Parser {
     struct Token *tokens;
-    int pos;
+    int tpos;
+    char* line;
 };
 
 // Variables and Tables
@@ -61,7 +63,7 @@ static const struct {
 
 // Forward declarations
 static int parse_batch(struct Parser *parser, struct Batch *batch);
-static int parse_pipeline(struct Parser *p, struct Pipeline *pipe);
+static int parse_pipeline(struct Parser *p, struct Pipeline *pl);
 static int parse_command(struct Parser *p, struct Command *cmd);
 static int tokenise(char *line, struct TokenList *toks);
 static char *read_word(char *p);
@@ -69,7 +71,15 @@ static size_t operator_at(const char *p, enum TokenType *type);
 
 // Parse a line of shell input
 int parse_line(char *line, struct Batch *batch) {
+
+    size_t llen = strlen(line);
+    if (llen > MAX_LINE - 1) {
+        fprintf(stderr, "s3: line too long\n");
+        return -1;
+    }
+
     batch->pipelinesc = 0;
+    strcpy(batch->line, line);
 
     // tokenise line
     struct TokenList token_list;
@@ -85,7 +95,8 @@ int parse_line(char *line, struct Batch *batch) {
     // parse line
     struct Parser parser = {
         .tokens = token_list.tokens,
-        .pos = 0
+        .tpos = 0,
+        .line = batch->line
     };
 
     if (parse_batch(&parser, batch) == -1) {
@@ -93,7 +104,7 @@ int parse_line(char *line, struct Batch *batch) {
     }
 
     // check for unparsed token
-    if (token_list.tokens[parser.pos].type != TOK_END) {
+    if (token_list.tokens[parser.tpos].type != TOK_END) {
         fprintf(stderr, "s3: unexpected token\n");
         return -1;
     }
@@ -118,13 +129,13 @@ static int parse_batch(struct Parser *p, struct Batch *bat) {
         bat->pipelinesc++;
 
         // keep going until no more pipeline separators are present
-        if (p->tokens[p->pos].type != TOK_SEMI) {
+        if (p->tokens[p->tpos].type != TOK_SEMI) {
             break;
         }
-        p->pos++;
+        p->tpos++;
 
         // check if next token is end as trailing ; is permitted
-        if (p->tokens[p->pos].type == TOK_END) {
+        if (p->tokens[p->tpos].type == TOK_END) {
             break;
         }
     }
@@ -149,10 +160,10 @@ static int parse_pipeline(struct Parser *p, struct Pipeline *pl) {
         pl->commandsc++;
 
         // keep going until no more command separators are present
-        if (p->tokens[p->pos].type != TOK_PIPE) {
+        if (p->tokens[p->tpos].type != TOK_PIPE) {
             break;
         }
-        p->pos++;
+        p->tpos++;
     }
 
     return 0;
@@ -163,7 +174,7 @@ static int parse_command(struct Parser *p, struct Command *cmd) {
     *cmd = (struct Command){0};
 
     while (1) {
-        const struct Token *t = &p->tokens[p->pos];
+        const struct Token *t = &p->tokens[p->tpos];
 
         switch (t->type) {
             case TOK_WORD: {
@@ -171,15 +182,21 @@ static int parse_command(struct Parser *p, struct Command *cmd) {
                     fprintf(stderr, "s3: too many arguments\n");
                     return -1;
                 }
+
+                if (cmd->subshell != NULL) {
+                    fprintf(stderr, "s3: syntax error near ')'\n");
+                    return -1;
+                }
             
                 cmd->args[cmd->argsc++] = t->word;
-                p->pos++;
+                p->tpos++;
                 continue;
             }
+
             case TOK_REDIR_IN:
             case TOK_REDIR_OUT:
             case TOK_REDIR_APPEND: {
-                const struct Token *file = &p->tokens[p->pos + 1];
+                const struct Token *file = &p->tokens[p->tpos + 1];
                 if (file->type != TOK_WORD) {
                     fprintf(stderr, "s3: expected a filename\n");
                     return -1;
@@ -190,16 +207,52 @@ static int parse_command(struct Parser *p, struct Command *cmd) {
                     cmd->outfile = file->word;
                     cmd->is_append = (t->type == TOK_REDIR_APPEND);
                 }
-                p->pos += 2;
+                p->tpos += 2;
                 continue;
             }
+
+            case TOK_LPAREN: {
+                if (cmd->argsc != 0 || cmd->subshell != NULL) {
+                    fprintf(stderr, "s3: syntax error near '('\n");
+                    return -1;
+                }
+                p->tpos++;
+                t = &p->tokens[p->tpos];
+
+                if (t->type == TOK_RPAREN) {
+                    fprintf(stderr, "s3: empty subshell\n");
+                    return -1;
+                }
+
+                cmd->subshell = p->line + t->offset;
+                int depth = 1;
+
+                while (depth != 0) {
+                    if (t->type == TOK_LPAREN) {
+                        depth++;
+                    } else if (t->type == TOK_RPAREN) {
+                        depth--;
+                        if (depth == 0) {
+                            p->line[t->offset] = '\0';
+                        }
+                    } else if (t->type == TOK_END) {
+                        fprintf(stderr, "s3: expected a )\n");
+                        return -1;
+                    }
+
+                    p->tpos++;
+                    t = &p->tokens[p->tpos];
+                }
+                continue;
+            }
+
             default:
                 break;
         }
         break;
     }
 
-    if (cmd->argsc == 0) {
+    if (cmd->argsc == 0 && cmd->subshell == NULL) {
         fprintf(stderr, "s3: expected a command\n");
         return -1;
     }
@@ -227,6 +280,7 @@ static int tokenise(char *line, struct TokenList *toks) {
 
         struct Token *t = &toks->tokens[toks->toksc];
         *t = (struct Token){0};
+        t->offset = (int)(p - line);
 
         enum TokenType type;
         size_t tlen = operator_at(p, &type);

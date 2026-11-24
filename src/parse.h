@@ -9,6 +9,7 @@ struct Command {
     char *args[MAX_ARGS];
     int argsc;
 
+    char *subshell;
     char *infile;
     char *outfile;
     int is_append;
@@ -20,6 +21,7 @@ struct Pipeline {
 };
 
 struct Batch {
+    char line[MAX_LINE];
     struct Pipeline pipelines[MAX_PIPELINES];
     int pipelinesc;
 };

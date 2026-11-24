@@ -20,8 +20,23 @@ int main(int argc, char *argv[]) {
     // initialize builtin cwd
     builtins_init();
 
-    char line[MAX_LINE];
     static struct Batch batch;
+
+    if (argc > 1) {
+        if (parse_line(argv[1], &batch) == -1) {
+            return 2;
+        }
+
+        // empty line
+        if (batch.pipelinesc == 0) {
+            return 0;
+        }
+
+        exec_batch(&batch);
+        return 0;
+    }
+
+    char line[MAX_LINE];
 
     while (1) {
         read_command_line(line);

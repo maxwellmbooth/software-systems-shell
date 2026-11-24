@@ -31,7 +31,7 @@ void exec_batch(const struct Batch *bat) {
 // Run through a pipeline and execute every command
 static void exec_pipeline(const struct Pipeline *pl) {
     // builtins run in the shell itself
-    if (pl->commandsc == 1) {
+    if (pl->commandsc == 1 && pl->commands[0].subshell == NULL) {
         builtin_fn builtin = builtin_find(pl->commands[0].args[0]);
         if (builtin) {
             exec_builtin(&pl->commands[0], builtin);
@@ -53,7 +53,10 @@ static void exec_pipeline(const struct Pipeline *pl) {
 
         // create pipe if not last command
         if (i != pl->commandsc - 1) {
-            pipe(pipe_fds);
+            if (pipe(pipe_fds) == -1) {
+                fprintf(stderr, "s3: error creating pipe\n");
+                return;
+            }
         }
 
         pid_t pid = fork();
@@ -93,16 +96,24 @@ static void exec_command(const struct Command *cmd) {
         _exit(EXIT_FAILURE);
     }
 
+    // execute subshell if used
+    if (cmd->subshell != NULL) {
+        execl("/proc/self/exe", "s3", cmd->subshell, (char *)NULL);
+        fprintf(stderr, "s3: error executing subshell %s: %s\n", cmd->subshell, strerror(errno));
+        _exit(127);
+    }
+
+    // will only run if no subshell
     builtin_fn builtin = builtin_find(cmd->args[0]);
     if (builtin) {
         int status = builtin(cmd->args, cmd->argsc);
         _exit(status);
     }
-
+        
     // run execvp on child process (error will only print if execvp fails)
     execvp(cmd->args[0], cmd->args);
     fprintf(stderr, "s3: error executing %s: %s\n", cmd->args[0], strerror(errno));
-    _exit(EXIT_FAILURE);
+    _exit(127);
 }
 
 // Execute a single builtin function
