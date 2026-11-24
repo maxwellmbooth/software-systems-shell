@@ -4,6 +4,14 @@
 // Internal headers
 #include "common.h"
 
+// Enums
+enum Separator {
+    SEP_AND,
+    SEP_OR,
+    SEP_SEMI,
+    SEP_NONE
+};
+
 // Structs
 struct Command {
     char *args[MAX_ARGS];
@@ -18,6 +26,7 @@ struct Command {
 struct Pipeline {
     struct Command commands[MAX_COMMANDS];
     int commandsc;
+    enum Separator sep;
 };
 
 struct Batch {

@@ -121,6 +121,7 @@ int parse_line(char *line, struct Batch *batch) {
 
 // Produce a batch of pipelines from the tokens
 static int parse_batch(struct Parser *p, struct Batch *bat) {
+    enum Separator sep = SEP_NONE;
     bat->pipelinesc = 0;
     
     while (1) {
@@ -133,16 +134,26 @@ static int parse_batch(struct Parser *p, struct Batch *bat) {
         if (parse_pipeline(p, &bat->pipelines[bat->pipelinesc]) == -1) {
             return -1;
         }
+
+        bat->pipelines[bat->pipelinesc].sep = sep;
         bat->pipelinesc++;
 
         // keep going until no more pipeline separators are present
-        if (p->tokens[p->tpos].type != TOK_SEMI) {
+        enum TokenType sep_type = p->tokens[p->tpos].type;
+        if (sep_type == TOK_AND) {
+            sep = SEP_AND;
+        } else if (sep_type == TOK_OR) {
+            sep = SEP_OR;
+        } else if (sep_type == TOK_SEMI) {
+            sep = SEP_SEMI;
+        } else {
             break;
         }
+
         p->tpos++;
 
         // check if next token is end as trailing ; is permitted
-        if (p->tokens[p->tpos].type == TOK_END) {
+        if (p->tokens[p->tpos].type == TOK_END && sep == SEP_SEMI) {
             break;
         }
     }

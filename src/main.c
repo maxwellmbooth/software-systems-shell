@@ -32,8 +32,8 @@ int main(int argc, char *argv[]) {
             return 0;
         }
 
-        exec_batch(&batch);
-        return 0;
+        int status = exec_batch(&batch);
+        return status;
     }
 
     char line[MAX_LINE];
@@ -50,7 +50,7 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        exec_batch(&batch);
+       exec_batch(&batch);
     }
 }
 

@@ -6,6 +6,6 @@
 #include "parse.h"
 
 // Function declarations
-void exec_batch(const struct Batch *bat);
+int exec_batch(const struct Batch *bat);
 
 #endif

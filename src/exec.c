@@ -13,29 +13,41 @@
 #include <string.h>
 
 // Forward declarations
-static void exec_pipeline(const struct Pipeline *pl);
+static int exec_pipeline(const struct Pipeline *pl);
 static void exec_command(const struct Command *cmd);
-static void exec_builtin(const struct Command *cmd, builtin_fn builtin);
+static int exec_builtin(const struct Command *cmd, builtin_fn builtin);
 static int redirect_pipes(const int pipe_fds[2], int last_read_fd);
 static int redirect_io(const struct Command *cmd);
+static int decode_status(int raw);
 
 // Run through a batch to run every pipeline
-void exec_batch(const struct Batch *bat) {
+int exec_batch(const struct Batch *bat) {
+    int last_stat = 0;
+
+    // check exit statuses for separators
     for (int i = 0; i < bat->pipelinesc; i++) {
-        exec_pipeline(&bat->pipelines[i]);
+        const struct Pipeline *pl = &bat->pipelines[i];
+
+        if ((pl->sep == SEP_AND) && (last_stat != 0)) {
+            continue;
+        } else if ((pl->sep == SEP_OR) && (last_stat == 0)) {
+            continue;
+        } else {
+            last_stat = exec_pipeline(pl);
+        }
     }
 
-    return;
+    return last_stat;
 }
 
 // Run through a pipeline and execute every command
-static void exec_pipeline(const struct Pipeline *pl) {
+static int exec_pipeline(const struct Pipeline *pl) {
     // builtins run in the shell itself
     if (pl->commandsc == 1 && pl->commands[0].subshell == NULL) {
         builtin_fn builtin = builtin_find(pl->commands[0].args[0]);
         if (builtin) {
-            exec_builtin(&pl->commands[0], builtin);
-            return;
+            int status = exec_builtin(&pl->commands[0], builtin);
+            return status;
         }
     }
     
@@ -55,13 +67,27 @@ static void exec_pipeline(const struct Pipeline *pl) {
         if (i != pl->commandsc - 1) {
             if (pipe(pipe_fds) == -1) {
                 fprintf(stderr, "s3: error creating pipe\n");
-                return;
+
+                if (last_read_fd != -1) {
+                    close(last_read_fd);
+                }
+
+                break;
             }
         }
 
         pid_t pid = fork();
         if (pid < 0) {
             perror("fork");
+
+            if (last_read_fd != -1) {
+                close(last_read_fd);
+            }
+            if (pipe_fds[0] != -1) {
+                close(pipe_fds[0]);
+                close(pipe_fds[1]);
+            }
+
             break;
         } else if (pid == 0) {
             redirect_pipes(pipe_fds, last_read_fd);
@@ -79,15 +105,22 @@ static void exec_pipeline(const struct Pipeline *pl) {
         if (pipe_fds[1] != -1) {
             close(pipe_fds[1]);
         }
+
         last_read_fd = pipe_fds[0];
     }
 
     // reap all child processes
+    int status = 0;
     for (int i = 0; i < pran; i++) {
-        waitpid(pids[i], NULL, 0);
+        waitpid(pids[i], &status, 0);
     }
-    
-    return;
+
+    // return failure if all commands didn't start
+    if (pran < pl->commandsc) {
+        return 1;
+    } else {
+        return decode_status(status);
+    }
 }
 
 // Execute a single command
@@ -117,7 +150,7 @@ static void exec_command(const struct Command *cmd) {
 }
 
 // Execute a single builtin function
-static void exec_builtin(const struct Command *cmd, builtin_fn builtin) {
+static int exec_builtin(const struct Command *cmd, builtin_fn builtin) {
     int in_fd = dup(STDIN_FILENO);
     int out_fd = dup(STDOUT_FILENO);
 
@@ -126,7 +159,7 @@ static void exec_builtin(const struct Command *cmd, builtin_fn builtin) {
         fprintf(stderr, "s3: dup: %s\n", strerror(errno));
         if (in_fd  != -1) close(in_fd);
         if (out_fd != -1) close(out_fd);
-        return;
+        return 1;
     }
 
     if (redirect_io(cmd) == -1) {
@@ -134,17 +167,17 @@ static void exec_builtin(const struct Command *cmd, builtin_fn builtin) {
         dup2(out_fd, STDOUT_FILENO);
         close(in_fd);
         close(out_fd);
-        return;
+        return 1;
     }
 
-    builtin(cmd->args, cmd->argsc);
+    int status = builtin(cmd->args, cmd->argsc);
 
     dup2(in_fd, STDIN_FILENO);
     dup2(out_fd, STDOUT_FILENO);
     close(in_fd);
     close(out_fd);
 
-    return;
+    return status;
 }
 
 static int redirect_pipes(const int pipe_fds[2], int last_read_fd) {
@@ -191,4 +224,15 @@ static int redirect_io(const struct Command *cmd) {
     }
 
     return 0;
+}
+
+// Decode waitpid status to shell exit status
+static int decode_status(int raw) {
+    if (WIFEXITED(raw)) {
+        return WEXITSTATUS(raw);
+    }
+    if (WIFSIGNALED(raw)) {
+        return 128 + WTERMSIG(raw);
+    }
+    return 1;
 }
