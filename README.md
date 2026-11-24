@@ -5,13 +5,17 @@
 - `cd` and `exit` **built-in** support
 - Support for **pipes** between commands
 - Support for **subshells**
+- Support for **globbing** with `*`, `?` and `{}` (not supported in redirects)
 - Fully configurable maximums in `common.h`
 ## Tokeniser and Parser
 - Each line tokenised appropriately allowing for easy operator handling
 - Produces a command batch containing an array of pipelines
     - Each pipeline contains an array of commands
+- Subshells are read and stored separately from arguments
+- Globbing done in command parser using `glob.h`
 ## Executor
 - Execution takes batch produced by parser
+- Subshells executed using `execl()`
 - Redirection of both IO and pipes between commands
 ## Built-ins
 - `cd` support

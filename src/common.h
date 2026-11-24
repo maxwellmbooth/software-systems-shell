@@ -11,6 +11,8 @@
 #define MAX_COMMANDS 16
 #define MAX_ARGS 128
 
+#define WORD_POOL_SIZE (64 * 1024)
+
 // ANSI color codes
 #define COLOR_BOLD "\033[1m"
 #define COLOR_RESET "\033[0m"
